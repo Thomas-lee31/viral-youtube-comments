@@ -1,0 +1,4 @@
+.env
+seen_videos.json
+youtubeads
+*.tmp
