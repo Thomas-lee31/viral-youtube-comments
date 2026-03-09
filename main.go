@@ -10,6 +10,7 @@ import (
 func main() {
 	start := time.Now()
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+	var runErrors []string
 
 	cfg, err := LoadConfig()
 	if err != nil {
@@ -18,14 +19,24 @@ func main() {
 
 	seen, err := LoadState(cfg.StateFile)
 	if err != nil {
-		log.Fatalf("state: %v", err)
+		msg := fmt.Sprintf("state load failed: %v", err)
+		logf(msg)
+		if alertErr := SendErrorAlert(cfg.DiscordWebhookURL, "youtubeads startup error", []string{msg}); alertErr != nil {
+			logf("Failed sending startup error alert: %v", alertErr)
+		}
+		os.Exit(1)
 	}
 
 	logf("Loaded %d channels, %d previously seen videos", len(cfg.Channels), len(seen))
 
 	newVideos := FetchNewVideos(cfg.Channels, seen)
 	if len(newVideos) == 0 {
-		logf("No new videos found. Exiting. (%s)", time.Since(start).Round(time.Millisecond))
+		duration := time.Since(start).Round(time.Millisecond)
+		msg := fmt.Sprintf("No new videos found.\nChannels checked: %d\nSeen videos tracked: %d\nRun time: %s", len(cfg.Channels), len(seen), duration)
+		if err := SendInfoAlert(cfg.DiscordWebhookURL, "youtubeads heartbeat", msg); err != nil {
+			logf("Failed sending heartbeat alert: %v", err)
+		}
+		logf("No new videos found. Exiting. (%s)", duration)
 		return
 	}
 
@@ -37,26 +48,36 @@ func main() {
 		transcript, err := FetchTranscript(video.VideoID)
 		if err != nil {
 			logf("Transcript unavailable for %s: %v (proceeding without)", video.VideoID, err)
+			runErrors = append(runErrors, fmt.Sprintf("transcript unavailable for %s (%s): %v", video.Title, video.VideoID, err))
 			transcript = fmt.Sprintf("[Transcript unavailable] Video: %s by %s", video.Title, video.ChannelName)
 		}
 
 		llmResponse, err := GenerateComments(cfg, video, transcript)
 		if err != nil {
 			logf("LLM failed for %s: %v", video.VideoID, err)
+			runErrors = append(runErrors, fmt.Sprintf("LLM failed for %s (%s): %v", video.Title, video.VideoID, err))
 			continue
 		}
 
 		if err := SendToDiscord(cfg.DiscordWebhookURL, video, llmResponse); err != nil {
 			logf("Discord delivery failed for %s: %v (will retry next run)", video.VideoID, err)
+			runErrors = append(runErrors, fmt.Sprintf("delivery failed for %s (%s): %v", video.Title, video.VideoID, err))
 			continue
 		}
 
 		seen[video.VideoID] = time.Now()
 		if err := SaveState(cfg.StateFile, seen); err != nil {
 			logf("Failed to save state after %s: %v", video.VideoID, err)
+			runErrors = append(runErrors, fmt.Sprintf("state save failed for %s (%s): %v", video.Title, video.VideoID, err))
 		}
 
 		logf("Successfully processed and delivered: %s", video.Title)
+	}
+
+	if len(runErrors) > 0 {
+		if err := SendErrorAlert(cfg.DiscordWebhookURL, "youtubeads run completed with errors", runErrors); err != nil {
+			logf("Failed sending run error alert: %v", err)
+		}
 	}
 
 	logf("Done. Processed %d video(s) in %s", len(newVideos), time.Since(start).Round(time.Millisecond))

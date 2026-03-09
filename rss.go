@@ -13,6 +13,7 @@ const (
 	rssFeedURL     = "https://www.youtube.com/feeds/videos.xml?channel_id=%s"
 	rssTimeout     = 10 * time.Second
 	maxConcurrency = 10
+	browserUA      = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
 )
 
 // Atom feed structures for YouTube's RSS XML.
@@ -87,7 +88,14 @@ func FetchNewVideos(channels []Channel, seen SeenVideos) []Video {
 func fetchLatestVideo(client *http.Client, ch Channel) (*Video, error) {
 	url := fmt.Sprintf(rssFeedURL, ch.ChannelID)
 
-	resp, err := client.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request for %s: %w", url, err)
+	}
+	req.Header.Set("User-Agent", browserUA)
+	req.Header.Set("Accept", "application/atom+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", url, err)
 	}

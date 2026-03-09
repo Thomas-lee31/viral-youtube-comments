@@ -63,7 +63,49 @@ func SendToDiscord(webhookURL string, video Video, llmResponse string) error {
 	}
 
 	payload := discordPayload{Embeds: []discordEmbed{embed}}
+	return postDiscordPayload(webhookURL, payload)
+}
 
+func SendErrorAlert(webhookURL string, title string, errors []string) error {
+	if len(errors) == 0 {
+		return nil
+	}
+
+	maxErrors := 8
+	if len(errors) < maxErrors {
+		maxErrors = len(errors)
+	}
+
+	var lines []string
+	for i := 0; i < maxErrors; i++ {
+		lines = append(lines, fmt.Sprintf("%d. %s", i+1, errors[i]))
+	}
+	if len(errors) > maxErrors {
+		lines = append(lines, fmt.Sprintf("...and %d more error(s)", len(errors)-maxErrors))
+	}
+
+	embed := discordEmbed{
+		Title:       title,
+		Color:       0xE74C3C, // red
+		Description: truncateField(strings.Join(lines, "\n"), 4096),
+	}
+
+	payload := discordPayload{Embeds: []discordEmbed{embed}}
+	return postDiscordPayload(webhookURL, payload)
+}
+
+func SendInfoAlert(webhookURL string, title string, message string) error {
+	embed := discordEmbed{
+		Title:       title,
+		Color:       0x2ECC71, // green
+		Description: truncateField(strings.TrimSpace(message), 4096),
+	}
+
+	payload := discordPayload{Embeds: []discordEmbed{embed}}
+	return postDiscordPayload(webhookURL, payload)
+}
+
+func postDiscordPayload(webhookURL string, payload discordPayload) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshalling discord payload: %w", err)

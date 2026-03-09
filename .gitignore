@@ -2,3 +2,4 @@
 seen_videos.json
 youtubeads
 *.tmp
+*.log
